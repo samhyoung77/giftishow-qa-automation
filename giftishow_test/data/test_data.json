@@ -1,0 +1,35 @@
+{
+  "base_url": "https://biz.giftishow.com",
+  "valid_user": {
+    "username": "samtest0002@gmail.com",
+    "password": "qwer1245**",
+    "email": "samtest0002@gmail.com"
+  },
+  "invalid_user": {
+    "username": "invalid_user",
+    "password": "wrong_password"
+  },
+  "test_products": [
+    {
+      "name": "스타벅스 아메리카노",
+      "category": "커피",
+      "price": 5000
+    },
+    {
+      "name": "GS25 모바일상품권",
+      "category": "편의점",
+      "price": 10000
+    }
+  ],
+  "test_order": {
+    "quantity": 10,
+    "recipient_name": "홍길동",
+    "recipient_phone": "010-1234-5678",
+    "message": "감사합니다"
+  },
+  "timeouts": {
+    "short": 5,
+    "medium": 10,
+    "long": 30
+  }
+}
