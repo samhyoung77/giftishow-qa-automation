@@ -1,5 +1,10 @@
 # 기프티쇼 자동화 테스트
 
+ython + Selenium WebDriver 기반의 웹 테스트 자동화 프레임워크로, pytest를 테스트 러너로 사용하며 Page Object Model(POM) 패턴을 적용했습니다. 
+로그인/로그아웃, 상품 카테고리 조회, 상품 검색 등 핵심 기능에 대한 자동화 테스트를 수행합니다. 
+테스트 결과는 Google Sheets에 실시간 기록되며, TestSummary 대시보드를 통해 전체 현황, OS별/TC별 통계, 실패 로그를 확인할 수 있습니다. HTML 리포트 자동 생성, 실패 시 스크린샷 저장, macOS/Windows 크로스 플랫폼 지원 기능을 제공합니다.
+
+
 > Selenium + POM 패턴 + Google Sheets 연동 자동화 테스트 프레임워크
 
 ## 📋 프로젝트 개요
