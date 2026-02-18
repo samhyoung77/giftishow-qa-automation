@@ -97,7 +97,11 @@ def driver(config):
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--start-maximized')
+
+            # 브라우저 창 위치 및 크기 설정 (OBS 녹화용)
+            # 외부 모니터 기준: x=0, y=0 / 크기: 1280x900
+            options.add_argument('--window-position=0,0')
+            options.add_argument('--window-size=1280,900')
 
             # Chrome 프로필 사용 안함 (충돌 문제로 비활성화)
             # 대신 쿠키 기반 세션 유지 사용
@@ -276,6 +280,16 @@ def pytest_configure(config):
         "markers", "scenario(name): Scenario name marker"
     )
 
+    # HTML 리포트 파일명에 날짜+시간 추가
+    if config.option.htmlpath:
+        # 기존 경로에서 파일명과 확장자 분리
+        html_path = config.option.htmlpath
+        if html_path.endswith('.html'):
+            base_path = html_path[:-5]  # .html 제거
+            datetime_suffix = datetime.now().strftime('%Y%m%d_%H%M%S')
+            config.option.htmlpath = f"{base_path}_{datetime_suffix}.html"
+            logger.info(f"HTML report path set to: {config.option.htmlpath}")
+
 
 # Pytest 명령줄 옵션 추가
 def pytest_addoption(parser):
@@ -312,6 +326,19 @@ def pytest_addoption(parser):
         default=None,
         type=int,
         help="Category level filter (1, 2, 3) for GS_PRODUCT_001"
+    )
+    parser.addoption(
+        "--start-from",
+        action="store",
+        default=None,
+        type=int,
+        help="Start testing from specific No. (e.g., --start-from 100)"
+    )
+    parser.addoption(
+        "--retry-fail",
+        action="store_true",
+        default=False,
+        help="Only re-test previously failed or untested categories"
     )
 
 

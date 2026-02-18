@@ -194,6 +194,13 @@ class GoogleSheetsReporter:
             # 시트 초기화 (기존 데이터 클리어)
             summary_sheet.clear()
 
+            # 시트 크기 확장 (최소 50행, 10열 확보)
+            try:
+                summary_sheet.resize(rows=50, cols=10)
+                self.logger.info("TestSummary sheet resized to 50 rows x 10 cols")
+            except Exception as resize_error:
+                self.logger.warning(f"Could not resize sheet: {resize_error}")
+
             # 전체 현황 헤더
             summary_sheet.update(values=[["📊 전체 현황"]], range_name='A1')
             summary_sheet.update(values=[["마지막 업데이트", "총 테스트", "PASS", "FAIL", "성공률"]], range_name='A2:E2')
@@ -532,10 +539,10 @@ class GoogleSheetsReporter:
         """
         Menu_tree_check_list 시트에서 카테고리 정보 가져오기
 
-        실제 시트 구조:
+        실제 시트 구조 (2026-02 업데이트):
         A: No, B: Level, C: BigCateSeq (대분류), D: MiddleCateSeq (중분류),
-        E: URL, F: Status, G: Last_Checked, H: Product_Count,
-        I: Note, J: Test_Result, K: Note (오류메시지)
+        E: SmallCateSeq (소분류), F: URL, G: Status, H: Last_Checked,
+        I: Product_Count, J: Note, K: Test_Result, L: Note (오류메시지)
 
         Returns:
             List[Dict]: 카테고리 정보 리스트
@@ -554,10 +561,13 @@ class GoogleSheetsReporter:
                 self.logger.warning("No data in Menu_tree_check_list")
                 return []
 
-            # 실제 시트 구조에 맞는 헤더 매핑
+            # 실제 시트 구조에 맞는 헤더 매핑 (2026-02 업데이트)
+            # A:No, B:Level, C:BigCateSeq, D:MiddleCateSeq, E:SmallCateSeq,
+            # F:URL, G:Status, H:Last_Checked, I:Product_Count, J:Note,
+            # K:Test_Result, L:Note(오류메시지)
             fixed_headers = [
-                'No', 'Level', 'BigCateSeq', 'MiddleCateSeq', 'URL',
-                'Status', 'Last_Checked', 'Product_Count', 'Note',
+                'No', 'Level', 'BigCateSeq', 'MiddleCateSeq', 'SmallCateSeq',
+                'URL', 'Status', 'Last_Checked', 'Product_Count', 'Note',
                 'Test_Result', 'Error_Message'
             ]
 
@@ -572,8 +582,10 @@ class GoogleSheetsReporter:
                     category[header] = value
 
                 # Category_Name 필드 추가 (호환성을 위해)
-                # MiddleCateSeq가 있으면 중분류, 없으면 대분류
-                if category.get('MiddleCateSeq'):
+                # SmallCateSeq > MiddleCateSeq > BigCateSeq 우선순위
+                if category.get('SmallCateSeq'):
+                    category['Category_Name'] = category['SmallCateSeq']
+                elif category.get('MiddleCateSeq'):
                     category['Category_Name'] = category['MiddleCateSeq']
                 else:
                     category['Category_Name'] = category['BigCateSeq']
@@ -590,24 +602,25 @@ class GoogleSheetsReporter:
             self.logger.error(f"Failed to get menu tree categories: {e}")
             return []
 
-    def update_category_test_result(self, category_name: str, result: str, product_count: int = None, error_msg: str = ""):
+    def update_category_test_result(self, category_name: str, result: str, product_count: int = None, error_msg: str = "", row_no: str = None):
         """
         특정 카테고리의 테스트 결과 업데이트
 
-        실제 시트 구조:
+        실제 시트 구조 (2026-02 업데이트):
         A: No, B: Level, C: BigCateSeq (대분류), D: MiddleCateSeq (중분류),
-        E: URL, F: Status, G: Last_Checked, H: Product_Count,
-        I: Note, J: Test_Result, K: Note (오류메시지)
+        E: SmallCateSeq (소분류), F: URL, G: Status, H: Last_Checked,
+        I: Product_Count, J: Note, K: Test_Result, L: Note (오류메시지)
 
         Args:
-            category_name: 카테고리 이름 (MiddleCateSeq 또는 BigCateSeq)
+            category_name: 카테고리 이름 (로그용)
             result: 테스트 결과 (Pass/Fail)
             product_count: 상품 개수 (선택)
             error_msg: 오류 메시지 (Fail 시)
+            row_no: 시트의 No 값 (A열) - 중복 카테고리명 구분용
 
         결과 기록:
-            J열: Pass/Fail
-            K열: 오류 메시지
+            K열: Pass/Fail
+            L열: 오류 메시지
         """
         if not self.sheet:
             self.logger.warning("Google Sheets not available")
@@ -623,34 +636,47 @@ class GoogleSheetsReporter:
                 self.logger.warning("No data in Menu_tree_check_list")
                 return False
 
-            # 해당 카테고리 찾기 (C열: BigCateSeq, D열: MiddleCateSeq 둘 다 확인)
+            # 해당 카테고리 찾기 (우선: No(A열)로 매칭, 없으면 이름으로 매칭)
             for row_idx, row in enumerate(all_values[1:], start=2):
-                if len(row) >= 4:
-                    big_cate = row[2] if len(row) > 2 else ""   # C열
-                    mid_cate = row[3] if len(row) > 3 else ""   # D열
+                if len(row) >= 5:
+                    # No 값으로 정확히 매칭 (중복명 문제 해결)
+                    if row_no and row[0] == str(row_no):
+                        pass  # 매칭됨 - 아래에서 업데이트
+                    elif not row_no:
+                        # row_no 없으면 기존 이름 매칭 (하위 호환)
+                        big_cate = row[2] if len(row) > 2 else ""
+                        mid_cate = row[3] if len(row) > 3 else ""
+                        small_cate = row[4] if len(row) > 4 else ""
 
-                    # MiddleCateSeq 또는 BigCateSeq와 일치하는지 확인
-                    if mid_cate == category_name or (not mid_cate and big_cate == category_name):
-                        # 테스트 결과 업데이트
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        if (small_cate and small_cate == category_name) or \
+                           (not small_cate and mid_cate and mid_cate == category_name) or \
+                           (not small_cate and not mid_cate and big_cate == category_name):
+                            pass  # 매칭됨 - 아래에서 업데이트
+                        else:
+                            continue
+                    else:
+                        continue
 
-                        # J열: Test_Result (Pass/Fail)
-                        menu_sheet.update(values=[[result]], range_name=f'J{row_idx}')
+                    # 테스트 결과 업데이트
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                        # G열: Last_Checked (마지막 확인 시간)
-                        menu_sheet.update(values=[[timestamp]], range_name=f'G{row_idx}')
+                    # K열: Test_Result (Pass/Fail)
+                    menu_sheet.update(values=[[result]], range_name=f'K{row_idx}')
 
-                        # H열: Product_Count (상품 개수)
-                        if product_count is not None:
-                            menu_sheet.update(values=[[product_count]], range_name=f'H{row_idx}')
+                    # H열: Last_Checked (마지막 확인 시간)
+                    menu_sheet.update(values=[[timestamp]], range_name=f'H{row_idx}')
 
-                        # K열: Error_Message (오류 메시지 - Fail 시)
-                        menu_sheet.update(values=[[error_msg]], range_name=f'K{row_idx}')
+                    # I열: Product_Count (상품 개수)
+                    if product_count is not None:
+                        menu_sheet.update(values=[[product_count]], range_name=f'I{row_idx}')
 
-                        self.logger.info(f"Updated test result for '{category_name}': {result}")
-                        return True
+                    # L열: Error_Message (오류 메시지 - Fail 시)
+                    menu_sheet.update(values=[[error_msg]], range_name=f'L{row_idx}')
 
-            self.logger.warning(f"Category '{category_name}' not found in Menu_tree_check_list")
+                    self.logger.info(f"Updated test result for No.{row_no or '?'} '{category_name}': {result}")
+                    return True
+
+            self.logger.warning(f"Category No.{row_no or '?'} '{category_name}' not found in Menu_tree_check_list")
             return False
 
         except Exception as e:

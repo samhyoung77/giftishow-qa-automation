@@ -202,9 +202,13 @@ class BasePage:
         Returns:
             str: 저장된 파일 경로
         """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         if name is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             name = f"screenshot_{timestamp}"
+        else:
+            # 기존 이름에 타임스탬프 추가
+            name = f"{name}_{timestamp}"
 
         # .png 확장자가 없으면 추가
         if not name.endswith('.png'):

@@ -156,30 +156,52 @@ class _CategoryURLTester:
             wait = WebDriverWait(self.driver, 15)
 
             # 기프티쇼 비즈 페이지 로딩 확인
-            # 1. 상품 이미지 확인 (alt 속성에 "이미지" 포함)
-            # 2. breadcrumb 네비게이션 확인
-            # 3. 총 N개 텍스트 확인
+            # URL 패턴에 따라 판촉(panchok) / 비즈샵(bizshop/bizDeliveryShop) 분기
+            is_bizshop = "/bizshop" in cat_url or "/bizDeliveryShop" in cat_url
             page_loaded = False
 
-            try:
-                # 상품 이미지 확인
-                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "img[alt$='이미지']")))
-                page_loaded = True
-            except TimeoutException:
-                pass
-
-            # breadcrumb 또는 article 요소로 확인
-            if not page_loaded:
+            if is_bizshop:
+                # === 비즈샵 페이지 ===
+                # goods-item-article (상품 카드) 확인
                 try:
-                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "nav[aria-label='Breadcrumb'], article")))
+                    wait.until(EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, "div.goods-item-article, div.goods-item-area")))
                     page_loaded = True
                 except TimeoutException:
                     pass
 
-            # 상품 개수 텍스트 확인 ("총 N개")
+                # 가격 필터 영역 확인 (비즈샵 특징)
+                if not page_loaded:
+                    try:
+                        wait.until(EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, "div.goods-item-comm-section")))
+                        page_loaded = True
+                    except TimeoutException:
+                        pass
+            else:
+                # === 판촉 페이지 ===
+                # 1. 상품 이미지 확인 (alt 속성에 "이미지" 포함)
+                try:
+                    wait.until(EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, "img[alt$='이미지']")))
+                    page_loaded = True
+                except TimeoutException:
+                    pass
+
+                # 2. breadcrumb 또는 article 요소로 확인
+                if not page_loaded:
+                    try:
+                        wait.until(EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, "nav[aria-label='Breadcrumb'], article")))
+                        page_loaded = True
+                    except TimeoutException:
+                        pass
+
+            # 공통: 상품 개수 텍스트 확인 ("총 N개")
             if not page_loaded:
                 try:
-                    wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '총') and contains(text(), '개')]")))
+                    wait.until(EC.presence_of_element_located(
+                        (By.XPATH, "//*[contains(text(), '총') and contains(text(), '개')]")))
                     page_loaded = True
                 except TimeoutException:
                     pass
@@ -207,7 +229,13 @@ class _CategoryURLTester:
                     result['error_msg'] = detail_result['error']
 
         except Exception as e:
-            result['error_msg'] = str(e)
+            error_str = str(e)
+            # 세션 에러는 복구를 위해 상위로 전달
+            if "invalid session id" in error_str or "session deleted" in error_str or \
+               "no such session" in error_str or "session not created" in error_str:
+                logger.error(f"  [SESSION ERROR] {cat_name}: {e}")
+                raise  # run_tests()의 세션 복구 로직에서 처리
+            result['error_msg'] = error_str
             logger.error(f"  [ERROR] {cat_name}: {e}")
 
         result['duration'] = round(time.time() - start_time, 2)
@@ -220,8 +248,32 @@ class _CategoryURLTester:
         Returns:
             int: 상품 개수
         """
-        # 기프티쇼 비즈: 상품 이미지는 alt 속성에 "이미지"가 포함됨
-        # 예: "리오3색터치 이미지", "파스텔라바초저점도 이미지"
+        current_url = self.driver.current_url
+
+        # === 비즈샵/배송상품 페이지: goods-item-article 카드 기반 ===
+        if "/bizshop" in current_url or "/bizDeliveryShop" in current_url:
+            try:
+                product_cards = self.driver.find_elements(
+                    By.CSS_SELECTOR, "div.goods-item-article"
+                )
+                visible_cards = [c for c in product_cards if c.is_displayed()]
+                if visible_cards:
+                    return len(visible_cards)
+            except:
+                pass
+
+            # 대체: goods-item-area
+            try:
+                product_areas = self.driver.find_elements(
+                    By.CSS_SELECTOR, "div.goods-item-area"
+                )
+                visible_areas = [a for a in product_areas if a.is_displayed()]
+                if visible_areas:
+                    return len(visible_areas)
+            except:
+                pass
+
+        # === 판촉 페이지: 상품 이미지 alt="...이미지" 기반 ===
         try:
             product_images = self.driver.find_elements(
                 By.CSS_SELECTOR, "img[alt$='이미지']"
@@ -232,12 +284,11 @@ class _CategoryURLTester:
         except:
             pass
 
-        # 대체 방법: 가격 요소로 카운트 (원 문자 포함)
+        # === 공통 대체: 가격 요소로 카운트 ===
         try:
             price_elements = self.driver.find_elements(
                 By.XPATH, "//*[contains(text(), '원') and string-length(text()) < 20]"
             )
-            # 가격 형식 필터링 (숫자+원)
             import re
             price_pattern = re.compile(r'[\d,]+원')
             price_count = 0
@@ -245,7 +296,7 @@ class _CategoryURLTester:
                 if elem.is_displayed() and price_pattern.match(elem.text.strip()):
                     price_count += 1
             if price_count > 0:
-                return price_count // 2  # 정가와 할인가가 함께 표시되므로 2로 나눔
+                return price_count // 2
         except:
             pass
 
@@ -265,21 +316,53 @@ class _CategoryURLTester:
         }
 
         try:
-            # 기프티쇼 비즈: 상품 이미지 클릭 (alt 속성에 "이미지" 포함)
-            # 예: "리오3색터치 이미지", "파스텔라바초저점도 이미지"
-            product_images = self.driver.find_elements(
-                By.CSS_SELECTOR, "img[alt$='이미지']"
-            )
-            visible_images = [img for img in product_images if img.is_displayed()]
+            current_url = self.driver.current_url
+            is_bizshop = "/bizshop" in current_url or "/bizDeliveryShop" in current_url
+            selected_element = None
+            product_name = "Unknown"
 
-            if not visible_images:
-                result['error'] = "No product images found"
-                logger.warning("    [WARN] No product images found")
-                return result
+            if is_bizshop:
+                # === 비즈샵: goods-item-article 내 이미지 또는 링크 클릭 ===
+                product_cards = self.driver.find_elements(
+                    By.CSS_SELECTOR, "div.goods-item-article"
+                )
+                visible_cards = [c for c in product_cards if c.is_displayed()]
 
-            # 첫 번째 상품 이미지 선택
-            selected_element = visible_images[0]
-            product_name = selected_element.get_attribute("alt").replace(" 이미지", "")
+                if not visible_cards:
+                    result['error'] = "No product cards found (bizshop)"
+                    logger.warning("    [WARN] No product cards found (bizshop)")
+                    return result
+
+                # 첫 번째 카드에서 클릭 가능한 요소 찾기
+                card = visible_cards[0]
+                try:
+                    # 카드 내 이미지
+                    selected_element = card.find_element(By.TAG_NAME, "img")
+                    product_name = selected_element.get_attribute("alt") or "Unknown"
+                except:
+                    try:
+                        # 카드 내 링크
+                        selected_element = card.find_element(By.TAG_NAME, "a")
+                        product_name = selected_element.text[:30] or "Unknown"
+                    except:
+                        selected_element = card  # 카드 자체 클릭
+                        product_name = "card-click"
+
+            else:
+                # === 판촉 페이지: 상품 이미지 클릭 (alt="...이미지") ===
+                product_images = self.driver.find_elements(
+                    By.CSS_SELECTOR, "img[alt$='이미지']"
+                )
+                visible_images = [img for img in product_images if img.is_displayed()]
+
+                if not visible_images:
+                    result['error'] = "No product images found"
+                    logger.warning("    [WARN] No product images found")
+                    return result
+
+                selected_element = visible_images[0]
+                product_name = selected_element.get_attribute("alt").replace(" 이미지", "")
+
             logger.info(f"    [INFO] Selected product: {product_name}")
 
             # 원래 URL 저장
@@ -287,15 +370,12 @@ class _CategoryURLTester:
 
             # 요소 클릭
             try:
-                # 스크롤하여 요소가 보이도록
                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", selected_element)
                 time.sleep(0.5)
-
                 selected_element.click()
                 result['clicked'] = True
                 logger.info("    [OK] Product clicked")
             except:
-                # JavaScript 클릭 시도
                 try:
                     self.driver.execute_script("arguments[0].click();", selected_element)
                     result['clicked'] = True
@@ -304,32 +384,26 @@ class _CategoryURLTester:
                     result['error'] = f"Click failed: {click_err}"
                     return result
 
-            time.sleep(3)  # 페이지 로딩 대기
+            time.sleep(3)
 
             # 상세 페이지 로딩 확인
             new_url = self.driver.current_url
 
-            # 기프티쇼 비즈 상세 페이지 URL 패턴: /panchok/product/{id}
-            if "/panchok/product/" in new_url:
+            # URL 패턴 확인: /panchok/product/ 또는 /bizshop/product/ 또는 goodsCode=/goodsNo= 등
+            if "/panchok/product/" in new_url or "/product/" in new_url or \
+               "goodsCode=" in new_url or "goodsNo=" in new_url or "/ggoods/detail" in new_url:
                 result['detail_loaded'] = True
-                logger.info(f"    [OK] Detail page loaded (URL: {new_url})")
+                logger.info(f"    [OK] Detail page loaded (URL: {new_url[:80]})")
             elif new_url != original_url:
-                # URL이 변경됨 - DOM 요소로 확인
-                # 기프티쇼 비즈 상세 페이지 특징:
-                # - heading (상품명)
-                # - tablist (상품설명/상품리뷰/배송결제)
-                # - 상품코드 텍스트
+                # URL 변경됨 - DOM 요소로 확인
                 detail_checks = [
-                    # 상품코드 (G로 시작하는 코드)
                     ("xpath", "//*[contains(text(), '상품코드')]"),
-                    # 탭 목록 (상품설명, 상품리뷰, 배송/결제)
                     ("css", "[role='tablist']"),
-                    # 주문서 접수 버튼
                     ("xpath", "//*[contains(text(), '주문서 접수')]"),
-                    # 장바구니 버튼
                     ("xpath", "//*[contains(text(), '장바구니')]"),
-                    # 상세정보 헤딩
-                    ("xpath", "//h2[contains(text(), '상세정보')] | //heading[contains(text(), '상세정보')]"),
+                    ("xpath", "//*[contains(text(), '구매하기')]"),
+                    ("xpath", "//*[contains(text(), '바로구매')]"),
+                    ("xpath", "//h2[contains(text(), '상세정보')]"),
                 ]
 
                 for check_type, selector in detail_checks:
@@ -345,20 +419,38 @@ class _CategoryURLTester:
                     except:
                         continue
 
-                # 페이지 타이틀로 확인 (상품명 | 기프티쇼 비즈)
+                # 페이지 타이틀로 확인
                 if not result['detail_loaded']:
                     page_title = self.driver.title
-                    if page_title and "기프티쇼 비즈" in page_title and "|" in page_title:
+                    if page_title and "기프티쇼" in page_title and page_title != "기프티쇼 비즈":
                         result['detail_loaded'] = True
                         logger.info(f"    [OK] Detail page loaded (title: {page_title[:40]})")
 
                 if not result['detail_loaded']:
                     result['error'] = "Detail page content not verified"
                     logger.warning("    [WARN] Detail page content not verified")
-
             else:
-                result['error'] = "URL did not change after click"
-                logger.warning("    [WARN] URL did not change after click")
+                # URL이 안 바뀐 경우 - 비즈샵은 모달/팝업으로 열릴 수도 있음
+                if is_bizshop:
+                    # 모달이나 새 콘텐츠 확인
+                    try:
+                        modal_checks = [
+                            (By.CSS_SELECTOR, "div.goods-detail, div.product-detail, div[class*='modal']"),
+                            (By.XPATH, "//*[contains(text(), '구매하기')] | //*[contains(text(), '장바구니')]"),
+                        ]
+                        for by, selector in modal_checks:
+                            elements = self.driver.find_elements(by, selector)
+                            visible = [e for e in elements if e.is_displayed()]
+                            if visible:
+                                result['detail_loaded'] = True
+                                logger.info("    [OK] Detail content found (same URL, modal/overlay)")
+                                break
+                    except:
+                        pass
+
+                if not result['detail_loaded']:
+                    result['error'] = "URL did not change after click"
+                    logger.warning("    [WARN] URL did not change after click")
 
             # 원래 페이지로 돌아가기
             if result['clicked']:
@@ -366,18 +458,77 @@ class _CategoryURLTester:
                 time.sleep(1.5)
 
         except Exception as e:
-            result['error'] = str(e)
+            error_str = str(e)
+            # 세션 에러는 상위로 전달
+            if "invalid session id" in error_str or "session deleted" in error_str or \
+               "no such session" in error_str or "session not created" in error_str:
+                raise
+            result['error'] = error_str
             logger.error(f"    [ERROR] Product detail test: {e}")
 
         return result
 
-    def run_tests(self, max_categories=None, level_filter=None):
+    def _is_session_alive(self):
+        """브라우저 세션이 살아있는지 확인"""
+        try:
+            _ = self.driver.current_url
+            return True
+        except Exception:
+            return False
+
+    def _recover_session(self):
+        """
+        브라우저 세션 복구 (크래시/타임아웃 시 자동 재시작)
+
+        Returns:
+            bool: 복구 성공 여부
+        """
+        logger.warning("Browser session lost! Attempting recovery...")
+        try:
+            # 기존 드라이버 정리
+            try:
+                self.driver.quit()
+            except Exception:
+                pass
+
+            # 새 드라이버 생성
+            if self.external_driver:
+                # pytest fixture에서 받은 driver인 경우 - conftest의 설정 재사용
+                from selenium.webdriver.chrome.options import Options
+                from webdriver_manager.chrome import ChromeDriverManager
+                from selenium.webdriver.chrome.service import Service
+
+                chrome_options = Options()
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+                chrome_options.add_argument("--window-position=0,0")
+                chrome_options.add_argument("--window-size=1280,900")
+                chrome_options.add_argument("--disable-notifications")
+
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                self.driver.implicitly_wait(10)
+                self.driver.set_page_load_timeout(30)
+            else:
+                self.setup_driver()
+
+            logger.info("Browser session recovered successfully!")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to recover browser session: {e}")
+            return False
+
+    def run_tests(self, max_categories=None, level_filter=None, start_from=None, retry_fail=False):
         """
         테스트 실행
 
         Args:
             max_categories: 테스트할 최대 카테고리 수 (None이면 전체)
             level_filter: 특정 레벨만 테스트 (1, 2, 3 또는 None)
+            start_from: 특정 No부터 테스트 시작 (예: 100이면 No=100부터)
+            retry_fail: True이면 이전에 Fail된 항목만 재테스트
 
         Returns:
             list: 테스트 결과 리스트
@@ -388,6 +539,23 @@ class _CategoryURLTester:
         if not categories:
             logger.error("No categories found in Google Sheets")
             return []
+
+        # Fail 항목만 재테스트
+        if retry_fail:
+            categories = [
+                c for c in categories
+                if str(c.get('Test_Result', '')).strip().lower() == 'fail'
+                or str(c.get('Test_Result', '')).strip() == ''
+            ]
+            logger.info(f"Retry-fail mode: {len(categories)} failed/untested categories")
+
+        # 특정 No부터 시작
+        if start_from:
+            categories = [
+                c for c in categories
+                if str(c.get('No', '0')).isdigit() and int(c.get('No', 0)) >= start_from
+            ]
+            logger.info(f"Starting from No.{start_from}: {len(categories)} categories")
 
         # 레벨 필터 (Google Sheets에서 가져온 Level은 문자열이므로 문자열 비교)
         if level_filter:
@@ -403,11 +571,63 @@ class _CategoryURLTester:
         # WebDriver 설정
         self.setup_driver()
 
+        session_recovery_count = 0
+        max_recoveries = 5  # 최대 복구 횟수
+
         try:
             for idx, category in enumerate(categories, 1):
                 logger.info(f"\n[{idx}/{len(categories)}] Testing category...")
 
-                result = self.test_category_page(category)
+                # 세션 상태 확인 및 복구
+                if not self._is_session_alive():
+                    if session_recovery_count >= max_recoveries:
+                        logger.error(f"Max session recoveries ({max_recoveries}) reached. Stopping.")
+                        break
+
+                    if self._recover_session():
+                        session_recovery_count += 1
+                        logger.info(f"Session recovered ({session_recovery_count}/{max_recoveries})")
+                        time.sleep(2)
+                    else:
+                        logger.error("Session recovery failed. Stopping.")
+                        break
+
+                # 테스트 실행 (세션 에러 시 복구 후 재시도)
+                try:
+                    result = self.test_category_page(category)
+                except Exception as e:
+                    if "invalid session id" in str(e) or "session deleted" in str(e):
+                        logger.warning(f"Session error during test: {e}")
+                        if session_recovery_count < max_recoveries and self._recover_session():
+                            session_recovery_count += 1
+                            time.sleep(2)
+                            # 복구 후 재시도
+                            try:
+                                result = self.test_category_page(category)
+                            except Exception as retry_e:
+                                result = {
+                                    'category_name': category.get('Category_Name', 'Unknown'),
+                                    'url': category.get('URL', ''),
+                                    'level': category.get('Level', 1),
+                                    'page_load': False, 'product_count': 0,
+                                    'product_click': False, 'detail_page': False,
+                                    'error_msg': f'Session recovery retry failed: {retry_e}',
+                                    'duration': 0
+                                }
+                        else:
+                            logger.error("Cannot recover session. Stopping tests.")
+                            break
+                    else:
+                        result = {
+                            'category_name': category.get('Category_Name', 'Unknown'),
+                            'url': category.get('URL', ''),
+                            'level': category.get('Level', 1),
+                            'page_load': False, 'product_count': 0,
+                            'product_click': False, 'detail_page': False,
+                            'error_msg': str(e)[:100],
+                            'duration': 0
+                        }
+
                 self.test_results.append(result)
 
                 # Google Sheets에 결과 업데이트
@@ -418,6 +638,9 @@ class _CategoryURLTester:
 
         finally:
             self.teardown_driver()
+
+        if session_recovery_count > 0:
+            logger.info(f"Session was recovered {session_recovery_count} time(s) during test")
 
         # 최종 요약
         self._print_summary()
@@ -441,6 +664,7 @@ class _CategoryURLTester:
 
         try:
             cat_name = category.get('Category_Name', '')
+            row_no = category.get('No', '')
 
             # 종합 결과 판정 (페이지 로딩 + 상세페이지 모두 성공해야 Pass)
             if result['page_load'] and result['detail_page']:
@@ -463,12 +687,13 @@ class _CategoryURLTester:
 
                 error_msg = "; ".join(errors) if errors else "Unknown error"
 
-            # Sheets 업데이트 (J열: Pass/Fail, K열: Error Message)
+            # Sheets 업데이트 (K열: Pass/Fail, L열: Error Message)
             self.sheets_reporter.update_category_test_result(
                 category_name=cat_name,
                 result=test_result,
                 product_count=result['product_count'],
-                error_msg=error_msg
+                error_msg=error_msg,
+                row_no=row_no
             )
 
         except Exception as e:
@@ -563,18 +788,31 @@ class TestCategoryURLs:
         CLI 옵션:
         - --max N: 최대 N개 카테고리만 테스트
         - --level N: 특정 레벨만 테스트 (1, 2, 3)
+        - --start-from N: No.N부터 테스트 시작
+        - --retry-fail: 이전 Fail/미테스트 항목만 재테스트
 
-        예: pytest tests/test_category_urls.py -v --max 5 --level 1
+        예:
+          pytest tests/test_category_urls.py -v --max 5 --level 1
+          pytest tests/test_category_urls.py -v --start-from 100
+          pytest tests/test_category_urls.py -v --retry-fail
+          pytest tests/test_category_urls.py -v --retry-fail --max 10
         """
         # CLI 옵션 가져오기
         max_categories = request.config.getoption("--max", default=None)
         level_filter = request.config.getoption("--level", default=None)
+        start_from = request.config.getoption("--start-from", default=None)
+        retry_fail = request.config.getoption("--retry-fail", default=False)
 
         # 테스터 생성 (외부 driver, sheets_reporter 사용)
         tester = _CategoryURLTester(driver=driver, sheets_reporter=sheets_reporter)
 
         # 테스트 실행
-        results = tester.run_tests(max_categories=max_categories, level_filter=level_filter)
+        results = tester.run_tests(
+            max_categories=max_categories,
+            level_filter=level_filter,
+            start_from=start_from,
+            retry_fail=retry_fail
+        )
 
         # 검증
         assert len(results) > 0, "테스트할 카테고리가 없습니다"

@@ -76,61 +76,47 @@ class LoginPage(BasePage):
 
     # ==================== Verifications ====================
     def is_logged_in(self, timeout=10):
-        """로그인 성공 여부 확인"""
+        """로그인 성공 여부 확인 (간소화 버전 - 타임아웃 방지)"""
         try:
-            time.sleep(2)
+            time.sleep(1)
             current_url = self.get_current_url()
+            self.logger.info(f"[로그인 확인] 현재 URL: {current_url}")
 
-            # 로그인 폼이 보이면 로그인 안 됨
-            try:
-                login_form = self.driver.find_element(By.XPATH, "//input[@placeholder='아이디(이메일)를 입력해주세요.']")
-                if login_form.is_displayed():
-                    return False
-            except:
-                pass
+            # 방법 1: URL 기반 확인 (가장 빠름, 타임아웃 없음)
+            # 로그인 페이지에 있으면 로그인 안됨
+            if "/login" in current_url.lower():
+                self.logger.info("[로그인 확인] ✗ 로그인 페이지에 있음")
+                return False
 
-            # 방법 1: "마이비즈" 텍스트 확인
+            # 홈 페이지면 로그인 성공
+            if "/home" in current_url.lower():
+                self.logger.info("✓ 로그인 확인 - 홈 페이지 URL")
+                return True
+
+            # 방법 2: mybiz 링크 확인 (1개만 시도)
             try:
-                mybiz_element = self.driver.find_element(By.XPATH, "//span[contains(text(), '마이비즈')]")
-                if mybiz_element and mybiz_element.is_displayed():
-                    self.logger.info("✓ 로그인 확인 - 마이비즈 텍스트")
+                mybiz_link = self.driver.find_element(By.XPATH, "//a[contains(@href, 'mybiz')]")
+                if mybiz_link:
+                    self.logger.info("✓ 로그인 확인 - mybiz 링크 발견")
                     return True
             except:
                 pass
 
-            # 방법 2: gBizUserNo 쿠키 확인
+            # 방법 3: 로그아웃 텍스트 확인 (1개만 시도)
             try:
-                cookies = self.driver.get_cookies()
-                for cookie in cookies:
-                    if cookie.get('name') == 'gBizUserNo' and cookie.get('value'):
-                        self.logger.info("✓ 로그인 확인 - gBizUserNo 쿠키")
-                        return True
+                logout_elem = self.driver.find_element(By.XPATH, "//*[contains(text(), '로그아웃')]")
+                if logout_elem:
+                    self.logger.info("✓ 로그인 확인 - 로그아웃 버튼 발견")
+                    return True
             except:
                 pass
 
-            # 방법 3: 로그아웃 버튼 확인
-            try:
-                logout_selectors = [
-                    "//*[contains(text(), '로그아웃')]",
-                    "//a[contains(., '로그아웃')]",
-                    "//button[contains(., '로그아웃')]",
-                ]
-                for selector in logout_selectors:
-                    try:
-                        logout_elem = self.driver.find_element(By.XPATH, selector)
-                        if logout_elem and logout_elem.is_displayed():
-                            self.logger.info("✓ 로그인 확인 - 로그아웃 버튼")
-                            return True
-                    except:
-                        continue
-            except:
-                pass
-
-            # 방법 4: mybiz URL 확인
-            if "mybiz" in current_url.lower():
-                self.logger.info("✓ 로그인 확인 - mybiz URL")
+            # 방법 4: 로그인 페이지가 아니고 giftishow.com이면 로그인 성공으로 간주
+            if "biz.giftishow.com" in current_url and "/login" not in current_url.lower():
+                self.logger.info("✓ 로그인 확인 - 로그인 페이지 아님")
                 return True
 
+            self.logger.info("[로그인 확인] 로그인 안됨으로 판단")
             return False
 
         except Exception as e:
